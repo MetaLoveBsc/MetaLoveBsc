@@ -7,7 +7,6 @@ import './lib/Ownable.sol';
 import './lib/ReentrancyGuard.sol';
 
 import './MetaLoveCoinToken.sol';
-// import "@nomiclabs/buidler/console.sol";
 
 // MasterChef is the master of MLC. He can make MLC and he is a fair guy.
 //
@@ -44,21 +43,22 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         IBEP20 lpToken;           // Address of LP token contract.
         uint256 allocPoint;       // How many allocation points assigned to this pool. MLCs to distribute per block.
         uint256 lastRewardBlock;  // Last block number that MLCs distribution occurs.
-        uint256 accMLCPerShare; // Accumulated MLCs per share, times 1e12. See below.
+        uint256 accMLCPerShare; // Accumulated MLCs per share, times 1e24. See below.
         uint16 depositFeeBP; // Deposit fee in basis points
         uint256 harvestInterval;  // Harvest interval in seconds
+        uint256 lpSupply;  // Current LP Supply
     }
 
     // The MLC TOKEN!
-    MetaLoveCoinToken public mlc;
+    MetaLoveCoinToken public immutable mlc;
     // MLC tokens created per block.
-    uint256 public mlcPerBlock;
+    uint256 public immutable mlcPerBlock;
     // Deposit Fee address
     address public feeAddress;
-    // Bonus muliplier for early mlc makers.
-    uint256 public BONUS_MULTIPLIER = 1;
-    // Max harvest interval: 1 days.
+    // Max harvest interval: 4 hours.
     uint256 public constant MAXIMUM_HARVEST_INTERVAL = 4 hours;
+    // Max alloc point
+    uint256 public constant MAX_ALLOC_POINT = 3500;
 
     // Info of each pool.
     PoolInfo[] public poolInfo;
@@ -67,9 +67,9 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     // Total allocation points. Must be the sum of all allocation points in all pools.
     uint256 public totalAllocPoint = 0;
     // The block number when MLC mining starts.
-    uint256 public startBlock;
+    uint256 public immutable startBlock;
     // The block number when Reward mining ends.
-    uint256 public bonusEndBlock;
+    uint256 public immutable endBlock;
     // Total locked up rewards
     uint256 public totalLockedUpRewards;
     // Referral Bonus in basis points. Initially set to 3%
@@ -81,18 +81,19 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     mapping(address => uint256) public referredCount; // referrer_address -> num_of_referred
     // Max deposit fee: 5%.
     uint16 public constant MAXIMUM_DEPOSIT_FEE_BP = 500;
+    // Max emission rate
+    uint256 public constant MAX_EMISSION_RATE = 1 ether;
     // Pool Exists Mapper
     mapping(IBEP20 => bool) public poolExistence;
-    // Pool ID Tracker Mapper
-    mapping(IBEP20 => uint256) public poolIdForLpAddress;
 
+    event AddPool(IBEP20 lpToken, uint256 allocPoint, uint256 lastRewardBlock, uint256 accMLGPerShare, uint16 depositFeeBP, uint256 harvestInterval);
+    event SetPool(uint256 pid, uint256 allocPoint, uint16 depositFeeBP, uint256 harvestInterval, bool withUpdate);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event SetFeeAddress(address indexed user, address indexed _feeAddress);
-    event EmissionRateUpdated(address indexed caller, uint256 previousAmount, uint256 newAmount);
     event RewardLockedUp(address indexed user, uint256 indexed pid, uint256 amountLockedUp);
-    event Referral(address indexed _referrer, address indexed _user);
+    event ReferralSet(address indexed _referrer, address indexed _user);
     event ReferralPaid(address indexed _user, address indexed _userTo, uint256 _reward);
     event ReferralBonusBpChanged(uint256 _oldBp, uint256 _newBp);
 
@@ -101,30 +102,37 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         address _feeAddress,
         uint256 _mlcPerBlock,
         uint256 _startBlock,
-        uint256 _bonusEndBlock
+        uint256 _endBlock
     ) public {
+        require(address(_mlc) != address(0));
+        require(_feeAddress != address(0));
+        require(_mlcPerBlock <= MAX_EMISSION_RATE, "");
+        require(_startBlock > block.number, "");
+        require(_endBlock > _startBlock, "");
+
         mlc = _mlc;
         feeAddress = _feeAddress;
         mlcPerBlock = _mlcPerBlock;
         startBlock = _startBlock;
-        bonusEndBlock = _bonusEndBlock;
+        endBlock = _endBlock;
 
         // staking pool
         poolInfo.push(PoolInfo({
             lpToken: _mlc,
             allocPoint: 1000,
-            lastRewardBlock: startBlock,
+            lastRewardBlock: _startBlock,
             accMLCPerShare: 0,
             depositFeeBP: 0,
-            harvestInterval: 0
+            harvestInterval: 4 hours,
+            lpSupply: 0
         }));
+
+        poolExistence[_mlc] = true;
+
+        emit AddPool(_mlc, 1000, _startBlock, 0, 0, 4 hours);
 
         totalAllocPoint = 1000;
 
-    }
-
-    function updateMultiplier(uint256 multiplierNumber) public onlyOwner {
-        BONUS_MULTIPLIER = multiplierNumber;
     }
 
     function poolLength() external view returns (uint256) {
@@ -138,9 +146,10 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     }
 
     // Add a new lp to the pool. Can only be called by the owner.
-    function add(uint256 _allocPoint, IBEP20 _lpToken, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) public onlyOwner nonDuplicated(_lpToken) {
-        require(_depositFeeBP <= MAXIMUM_DEPOSIT_FEE_BP, "set: invalid deposit fee basis points");
+    function add(uint256 _allocPoint, IBEP20 _lpToken, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) external onlyOwner nonDuplicated(_lpToken) {
+        require(_depositFeeBP <= MAXIMUM_DEPOSIT_FEE_BP, "add: invalid deposit fee basis points");
         require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
+        require(_allocPoint <= MAX_ALLOC_POINT, "add: invalid alloc point");
         if (_withUpdate) {
             massUpdatePools();
         }
@@ -148,19 +157,23 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         totalAllocPoint = totalAllocPoint.add(_allocPoint);
         poolExistence[_lpToken] = true;
         poolInfo.push(PoolInfo({
-        lpToken: _lpToken,
-        allocPoint: _allocPoint,
-        lastRewardBlock: lastRewardBlock,
-        accMLCPerShare: 0,
-        depositFeeBP: _depositFeeBP,
-        harvestInterval: _harvestInterval
+            lpToken: _lpToken,
+            allocPoint: _allocPoint,
+            lastRewardBlock: lastRewardBlock,
+            accMLCPerShare: 0,
+            depositFeeBP: _depositFeeBP,
+            harvestInterval: _harvestInterval,
+            lpSupply: 0
         }));
+
+        emit AddPool(_lpToken, _allocPoint, lastRewardBlock, 0, _depositFeeBP, _harvestInterval);
     }
 
     // Update the given pool's MLC allocation point. Can only be called by the owner.
-    function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) public onlyOwner {
+    function set(uint256 _pid, uint256 _allocPoint, uint16 _depositFeeBP, uint256 _harvestInterval, bool _withUpdate) external onlyOwner {
         require(_depositFeeBP <= MAXIMUM_DEPOSIT_FEE_BP, "set: invalid deposit fee basis points");
-        require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "add: invalid harvest interval");
+        require(_harvestInterval <= MAXIMUM_HARVEST_INTERVAL, "set: invalid harvest interval");
+        require(_allocPoint <= MAX_ALLOC_POINT, "set: invalid alloc point");
         if (_withUpdate) {
             massUpdatePools();
         }
@@ -171,16 +184,18 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         if (prevAllocPoint != _allocPoint) {
             totalAllocPoint = totalAllocPoint.sub(prevAllocPoint).add(_allocPoint);
         }
+
+        emit SetPool(_pid, _allocPoint, _depositFeeBP, _harvestInterval, _withUpdate);
     }
 
     // Return reward multiplier over the given _from to _to block.
     function getMultiplier(uint256 _from, uint256 _to) public view returns (uint256) {
-        if (_to <= bonusEndBlock) {
+        if (_to <= endBlock) {
             return _to.sub(_from);
-        } else if (_from >= bonusEndBlock) {
+        } else if (_from >= endBlock) {
             return 0;
         } else {
-            return bonusEndBlock.sub(_from);
+            return endBlock.sub(_from);
         }
     }
 
@@ -189,13 +204,13 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][_user];
         uint256 accMLCPerShare = pool.accMLCPerShare;
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (block.number > pool.lastRewardBlock && lpSupply != 0) {
+        uint256 lpSupply = pool.lpSupply;
+        if (block.number > pool.lastRewardBlock && lpSupply != 0 && totalAllocPoint != 0) {
             uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
             uint256 mlcReward = multiplier.mul(mlcPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-            accMLCPerShare = accMLCPerShare.add(mlcReward.mul(1e12).div(lpSupply));
+            accMLCPerShare = accMLCPerShare.add(mlcReward.mul(1e24).div(lpSupply));
         }
-        uint256 pending = user.amount.mul(accMLCPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 pending = user.amount.mul(accMLCPerShare).div(1e24).sub(user.rewardDebt);
         return pending.add(user.rewardLockedUp);
     }
 
@@ -219,8 +234,8 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         if (block.number <= pool.lastRewardBlock) {
             return;
         }
-        uint256 lpSupply = pool.lpToken.balanceOf(address(this));
-        if (lpSupply == 0) {
+        uint256 lpSupply = pool.lpSupply;
+        if (lpSupply == 0 || totalAllocPoint == 0) {
             pool.lastRewardBlock = block.number;
             return;
         }
@@ -228,18 +243,20 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         uint256 mlcReward = multiplier.mul(mlcPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
         mlc.mint(feeAddress, mlcReward.div(3));
         mlc.mint(address(this), mlcReward);
-        pool.accMLCPerShare = pool.accMLCPerShare.add(mlcReward.mul(1e12).div(lpSupply));
+        pool.accMLCPerShare = pool.accMLCPerShare.add(mlcReward.mul(1e24).div(lpSupply));
         pool.lastRewardBlock = block.number;
     }
 
     // Deposit LP tokens to MasterChef for MLC allocation.
-    function deposit(uint256 _pid, uint256 _amount) public nonReentrant {
+    function deposit(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         payOrLockupPendingCryptoMLC(_pid);
         if (_amount > 0) {
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            uint256 balanceBefore = pool.lpToken.balanceOf(address(this));
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
+            _amount = pool.lpToken.balanceOf(address(this)).sub(balanceBefore);
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
                 user.amount = user.amount.add(_amount).sub(depositFee);
@@ -247,20 +264,23 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
             } else {
                 user.amount = user.amount.add(_amount);
             }
+            pool.lpSupply = pool.lpSupply.add(_amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e12);
+        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e24);
         emit Deposit(msg.sender, _pid, _amount);
     }
 
     // Deposit LP tokens to MasterChef for MLC allocation with referral.
-    function deposit(uint256 _pid, uint256 _amount, address _referrer) public nonReentrant {
+    function deposit(uint256 _pid, uint256 _amount, address _referrer) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         updatePool(_pid);
         payOrLockupPendingCryptoMLC(_pid);
         if (_amount > 0) {
             setReferral(msg.sender, _referrer);
-            pool.lpToken.safeTransferFrom(address(msg.sender), address(this), _amount);
+            uint256 balanceBefore = pool.lpToken.balanceOf(address(this));
+            pool.lpToken.safeTransferFrom(msg.sender, address(this), _amount);
+            _amount = pool.lpToken.balanceOf(address(this)).sub(balanceBefore);
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
                 user.amount = user.amount.add(_amount).sub(depositFee);
@@ -268,13 +288,14 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
             } else {
                 user.amount = user.amount.add(_amount);
             }
+            pool.lpSupply = pool.lpSupply.add(_amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e12);
+        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e24);
         emit Deposit(msg.sender, _pid, _amount);
     }
 
     // Withdraw LP tokens from MasterChef.
-    function withdraw(uint256 _pid, uint256 _amount) public nonReentrant {
+    function withdraw(uint256 _pid, uint256 _amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
         require(user.amount >= _amount, "withdraw: not good");
@@ -283,18 +304,20 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         payOrLockupPendingCryptoMLC(_pid);
         if(_amount > 0) {
             user.amount = user.amount.sub(_amount);
-            pool.lpToken.safeTransfer(address(msg.sender), _amount);
+            pool.lpToken.safeTransfer(msg.sender, _amount);
+            pool.lpSupply = pool.lpSupply.sub(_amount);
         }
-        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e12);
+        user.rewardDebt = user.amount.mul(pool.accMLCPerShare).div(1e24);
         emit Withdraw(msg.sender, _pid, _amount);
     }
 
     // Withdraw without caring about rewards. EMERGENCY ONLY.
-    function emergencyWithdraw(uint256 _pid) public {
+    function emergencyWithdraw(uint256 _pid) external nonReentrant {
         PoolInfo storage pool = poolInfo[_pid];
         UserInfo storage user = userInfo[_pid][msg.sender];
-        pool.lpToken.safeTransfer(address(msg.sender), user.amount);
+        pool.lpToken.safeTransfer(msg.sender, user.amount);
         emit EmergencyWithdraw(msg.sender, _pid, user.amount);
+        pool.lpSupply = pool.lpSupply.sub(user.amount);
         user.amount = 0;
         user.rewardDebt = 0;
     }
@@ -305,10 +328,16 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][msg.sender];
 
         if (user.nextHarvestUntil == 0) {
-            user.nextHarvestUntil = block.timestamp.add(pool.harvestInterval);
+            if (block.number >= startBlock) {
+                user.nextHarvestUntil = block.timestamp.add(pool.harvestInterval);
+            } else {
+                //1 Block every 3 seconds aprox;
+                uint256 aproxSecondsToRewardsStarts = startBlock.sub(block.number).mul(3);
+                user.nextHarvestUntil = block.timestamp.add(aproxSecondsToRewardsStarts).add(pool.harvestInterval);
+            }
         }
 
-        uint256 pending = user.amount.mul(pool.accMLCPerShare).div(1e12).sub(user.rewardDebt);
+        uint256 pending = user.amount.mul(pool.accMLCPerShare).div(1e24).sub(user.rewardDebt);
         if (canHarvest(_pid, msg.sender)) {
             if (pending > 0 || user.rewardLockedUp > 0) {
                 uint256 totalRewards = pending.add(user.rewardLockedUp);
@@ -337,7 +366,7 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     }
 
     // Update fee address by the previous fee address.
-    function setFeeAddress(address _feeAddress) public {
+    function setFeeAddress(address _feeAddress) external {
         require(_feeAddress != address(0), "setFeeAddress: invalid address");
         require(msg.sender == feeAddress, "setFeeAddress: FORBIDDEN");
         feeAddress = _feeAddress;
@@ -349,18 +378,18 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         if (_referrer == address(_referrer) && referrers[_user] == address(0) && _referrer != address(0) && _referrer != _user) {
             referrers[_user] = _referrer;
             referredCount[_referrer] += 1;
-            emit Referral(_user, _referrer);
+            emit ReferralSet(_referrer, _user);
         }
     }
 
-    // Get Referral Address for a Account
-    function getReferral(address _user) public view returns (address) {
+    // Get Referrer Address for a Account
+    function getReferrer(address _user) public view returns (address) {
         return referrers[_user];
     }
 
-    // Pay referral commission to the referrer who referred this user.
+    // Pay referrer commission to the referrer who referred this user.
     function payReferralCommission(address _user, uint256 _pending) internal {
-        address referrer = getReferral(_user);
+        address referrer = getReferrer(_user);
         if (referrer != address(0) && referrer != _user && refBonusBP > 0) {
             uint256 refBonusEarned = _pending.mul(refBonusBP).div(10000);
             mlc.mint(referrer, refBonusEarned);
@@ -369,9 +398,9 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     }
 
     // Referral Bonus in basis points.
-    function updateReferralBonusBp(uint256 _newRefBonusBp) public onlyOwner {
-        require(_newRefBonusBp <= MAXIMUM_REFERRAL_BP, "updateRefBonusPercent: invalid referral bonus basis points");
-        require(_newRefBonusBp != refBonusBP, "updateRefBonusPercent: same bonus bp set");
+    function updateReferralBonusBp(uint256 _newRefBonusBp) external onlyOwner {
+        require(_newRefBonusBp <= MAXIMUM_REFERRAL_BP, "updateReferralBonusBp: invalid referral bonus, no changes");
+        require(_newRefBonusBp != refBonusBP, "updateReferralBonusBp: same bonus bp, no changes");
         uint256 previousRefBonusBP = refBonusBP;
         refBonusBP = _newRefBonusBp;
         emit ReferralBonusBpChanged(previousRefBonusBP, _newRefBonusBp);

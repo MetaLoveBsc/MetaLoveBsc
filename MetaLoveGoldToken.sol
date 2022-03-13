@@ -5,7 +5,7 @@ import "./lib/BEP20.sol";
 // MetaLoveGoldToken with Governance.
 contract MetaLoveGoldToken is BEP20('Meta Love Gold', 'MLG') {
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterChef).
-    function mint(address _to, uint256 _amount) public onlyOwner {
+    function mint(address _to, uint256 _amount) external onlyOwner {
         _mint(_to, _amount);
         _moveDelegates(address(0), _delegates[_to], _amount);
     }
@@ -66,57 +66,6 @@ contract MetaLoveGoldToken is BEP20('Meta Love Gold', 'MLG') {
         return _delegate(msg.sender, delegatee);
     }
 
-    /**
-     * @notice Delegates votes from signatory to `delegatee`
-     * @param delegatee The address to delegate votes to
-     * @param nonce The contract state required to match the signature
-     * @param expiry The time at which to expire the signature
-     * @param v The recovery byte of the signature
-     * @param r Half of the ECDSA signature pair
-     * @param s Half of the ECDSA signature pair
-     */
-    function delegateBySig(
-        address delegatee,
-        uint nonce,
-        uint expiry,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    )
-    external
-    {
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                DOMAIN_TYPEHASH,
-                keccak256(bytes(name())),
-                getChainId(),
-                address(this)
-            )
-        );
-
-        bytes32 structHash = keccak256(
-            abi.encode(
-                DELEGATION_TYPEHASH,
-                delegatee,
-                nonce,
-                expiry
-            )
-        );
-
-        bytes32 digest = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                domainSeparator,
-                structHash
-            )
-        );
-
-        address signatory = ecrecover(digest, v, r, s);
-        require(signatory != address(0), "EGIRL::delegateBySig: invalid signature");
-        require(nonce == nonces[signatory]++, "EGIRL::delegateBySig: invalid nonce");
-        require(now <= expiry, "EGIRL::delegateBySig: signature expired");
-        return _delegate(signatory, delegatee);
-    }
 
     /**
      * @notice Gets the current votes balance for `account`
@@ -144,7 +93,7 @@ contract MetaLoveGoldToken is BEP20('Meta Love Gold', 'MLG') {
     view
     returns (uint256)
     {
-        require(blockNumber < block.number, "EGIRL::getPriorVotes: not yet determined");
+        require(blockNumber < block.number, "MLG::getPriorVotes: not yet determined");
 
         uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
@@ -181,7 +130,7 @@ contract MetaLoveGoldToken is BEP20('Meta Love Gold', 'MLG') {
     internal
     {
         address currentDelegate = _delegates[delegator];
-        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying EGIRL (not scaled);
+        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying MLG (not scaled);
         _delegates[delegator] = delegatee;
 
         emit DelegateChanged(delegator, currentDelegate, delegatee);
@@ -217,7 +166,7 @@ contract MetaLoveGoldToken is BEP20('Meta Love Gold', 'MLG') {
     )
     internal
     {
-        uint32 blockNumber = safe32(block.number, "EGIRL::_writeCheckpoint: block number exceeds 32 bits");
+        uint32 blockNumber = safe32(block.number, "MLG::_writeCheckpoint: block number exceeds 32 bits");
 
         if (nCheckpoints > 0 && checkpoints[delegatee][nCheckpoints - 1].fromBlock == blockNumber) {
             checkpoints[delegatee][nCheckpoints - 1].votes = newVotes;
