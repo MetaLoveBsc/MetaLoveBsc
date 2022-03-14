@@ -6,6 +6,10 @@ import './lib/SafeBEP20.sol';
 import './lib/Ownable.sol';
 import './lib/ReentrancyGuard.sol';
 
+interface IMetaLoveGoldToken is IBEP20 {
+    function mint(address _to, uint256 _amount) external;
+}
+
 // MasterChef is the master of MLG. He can make MLG and he is a fair guy.
 //
 // Note that it's ownable and the owner wields tremendous power. The ownership
@@ -16,6 +20,7 @@ import './lib/ReentrancyGuard.sol';
 contract MasterChefMLG is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
+    using SafeBEP20 for IMetaLoveGoldToken;
 
     // Info of each user.
     struct UserInfo {
@@ -48,7 +53,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     }
 
     // The MLG TOKEN!
-    IBEP20 public immutable mlg;
+    IMetaLoveGoldToken public immutable mlg;
     // MLG tokens created per block.
     uint256 public immutable mlgPerBlock;
     // Deposit Fee address
@@ -98,7 +103,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     event ReferralBonusBpChanged(uint256 _oldBp, uint256 _newBp);
 
     constructor(
-        IBEP20 _mlg,
+        IMetaLoveGoldToken _mlg,
         address _feeAddress,
         uint256 _mlgPerBlock,
         uint256 _startBlock,
@@ -353,9 +358,9 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     function safeMLGTransfer(address _to, uint256 _amount) internal {
         uint256 mlgBalance = mlg.balanceOf(address(this));
         if (_amount > mlgBalance) {
-            mlg.transfer(_to, mlgBalance);
+            mlg.safeTransfer(_to, mlgBalance);
         } else {
-            mlg.transfer(_to, _amount);
+            mlg.safeTransfer(_to, _amount);
         }
     }
 

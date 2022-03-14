@@ -6,6 +6,10 @@ import './lib/SafeBEP20.sol';
 import './lib/Ownable.sol';
 import './lib/ReentrancyGuard.sol';
 
+interface IMetaLoveCoinToken is IBEP20 {
+    function mint(address _to, uint256 _amount) external;
+}
+
 // MasterChef is the master of MLC. He can make MLC and he is a fair guy.
 //
 // Note that it's ownable and the owner wields tremendous power. The ownership
@@ -16,6 +20,7 @@ import './lib/ReentrancyGuard.sol';
 contract MasterChefMLC is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeBEP20 for IBEP20;
+    using SafeBEP20 for IMetaLoveCoinToken;
 
     // Info of each user.
     struct UserInfo {
@@ -48,7 +53,7 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     }
 
     // The MLC TOKEN!
-    IBEP20 public immutable mlc;
+    IMetaLoveCoinToken public immutable mlc;
     // MLC tokens created per block.
     uint256 public immutable mlcPerBlock;
     // Deposit Fee address
@@ -98,7 +103,7 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     event ReferralBonusBpChanged(uint256 _oldBp, uint256 _newBp);
 
     constructor(
-        IBEP20 _mlc,
+        IMetaLoveCoinToken _mlc,
         address _feeAddress,
         uint256 _mlcPerBlock,
         uint256 _startBlock,
