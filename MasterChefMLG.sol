@@ -6,8 +6,6 @@ import './lib/SafeBEP20.sol';
 import './lib/Ownable.sol';
 import './lib/ReentrancyGuard.sol';
 
-import './MetaLoveGoldToken.sol';
-
 // MasterChef is the master of MLG. He can make MLG and he is a fair guy.
 //
 // Note that it's ownable and the owner wields tremendous power. The ownership
@@ -50,7 +48,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     }
 
     // The MLG TOKEN!
-    MetaLoveGoldToken public immutable mlg;
+    IBEP20 public immutable mlg;
     // MLG tokens created per block.
     uint256 public immutable mlgPerBlock;
     // Deposit Fee address
@@ -70,6 +68,8 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     uint256 public immutable startBlock;
     // The block number when Reward mining ends.
     uint256 public immutable endBlock;
+    // Blocks that must pass from the startBlock, to canHarvest (aprox 4h)
+    uint256 constant noHarvestDuring = 4800;
     // Total locked up rewards
     uint256 public totalLockedUpRewards;
     // Referral Bonus in basis points. Initially set to 3%
@@ -98,7 +98,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     event ReferralBonusBpChanged(uint256 _oldBp, uint256 _newBp);
 
     constructor(
-        MetaLoveGoldToken _mlg,
+        IBEP20 _mlg,
         address _feeAddress,
         uint256 _mlgPerBlock,
         uint256 _startBlock,
@@ -217,7 +217,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
     // View function to see if user can harvest MLG's.
     function canHarvest(uint256 _pid, address _user) public view returns (bool) {
         UserInfo storage user = userInfo[_pid][_user];
-        return block.timestamp >= user.nextHarvestUntil;
+        return block.timestamp >= user.nextHarvestUntil && block.number >= startBlock + noHarvestDuring;
     }
 
     // Update reward variables for all pools. Be careful of gas spending!
@@ -328,13 +328,7 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
         UserInfo storage user = userInfo[_pid][msg.sender];
 
         if (user.nextHarvestUntil == 0) {
-            if (block.number >= startBlock) {
-                user.nextHarvestUntil = block.timestamp.add(pool.harvestInterval);
-            } else {
-                //1 Block every 3 seconds aprox;
-                uint256 aproxSecondsToRewardsStarts = startBlock.sub(block.number).mul(3);
-                user.nextHarvestUntil = block.timestamp.add(aproxSecondsToRewardsStarts).add(pool.harvestInterval);
-            }
+            user.nextHarvestUntil = block.timestamp.add(pool.harvestInterval);
         }
 
         uint256 pending = user.amount.mul(pool.accMLGPerShare).div(1e24).sub(user.rewardDebt);
