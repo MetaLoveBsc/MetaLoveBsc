@@ -86,7 +86,7 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     // Pool Exists Mapper
     mapping(IBEP20 => bool) public poolExistence;
 
-    event AddPool(IBEP20 lpToken, uint256 allocPoint, uint256 lastRewardBlock, uint256 accMLGPerShare, uint16 depositFeeBP, uint256 harvestInterval);
+    event AddPool(IBEP20 lpToken, uint256 allocPoint, uint256 lastRewardBlock, uint256 accMLCPerShare, uint16 depositFeeBP, uint256 harvestInterval);
     event SetPool(uint256 pid, uint256 allocPoint, uint16 depositFeeBP, uint256 harvestInterval, bool withUpdate);
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
