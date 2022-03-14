@@ -106,9 +106,9 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
     ) public {
         require(address(_mlc) != address(0));
         require(_feeAddress != address(0));
-        require(_mlcPerBlock <= MAX_EMISSION_RATE, "");
-        require(_startBlock > block.number, "");
-        require(_endBlock > _startBlock, "");
+        require(_mlcPerBlock <= MAX_EMISSION_RATE, "Tokens per block more than allowed");
+        require(_startBlock > block.number, "Start block must be higher than current");
+        require(_endBlock > _startBlock, "The end block must be larger than the start block");
 
         mlc = _mlc;
         feeAddress = _feeAddress;
