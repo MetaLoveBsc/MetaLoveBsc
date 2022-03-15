@@ -246,7 +246,7 @@ contract MasterChefMLC is Ownable, ReentrancyGuard {
         }
         uint256 multiplier = getMultiplier(pool.lastRewardBlock, block.number);
         uint256 mlcReward = multiplier.mul(mlcPerBlock).mul(pool.allocPoint).div(totalAllocPoint);
-        mlc.mint(feeAddress, mlcReward.div(3));
+        mlc.mint(feeAddress, mlcReward.mul(3).div(100));
         mlc.mint(address(this), mlcReward);
         pool.accMLCPerShare = pool.accMLCPerShare.add(mlcReward.mul(1e24).div(lpSupply));
         pool.lastRewardBlock = block.number;
