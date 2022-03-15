@@ -265,11 +265,12 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
                 user.amount = user.amount.add(_amount).sub(depositFee);
+                pool.lpSupply = pool.lpSupply.add(_amount);
                 pool.lpToken.safeTransfer(feeAddress, depositFee);
             } else {
                 user.amount = user.amount.add(_amount);
+                pool.lpSupply = pool.lpSupply.add(_amount);
             }
-            pool.lpSupply = pool.lpSupply.add(_amount);
         }
         user.rewardDebt = user.amount.mul(pool.accMLGPerShare).div(1e24);
         emit Deposit(msg.sender, _pid, _amount);
@@ -289,9 +290,11 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
             if (pool.depositFeeBP > 0) {
                 uint256 depositFee = _amount.mul(pool.depositFeeBP).div(10000);
                 user.amount = user.amount.add(_amount).sub(depositFee);
+                pool.lpSupply = pool.lpSupply.add(_amount);
                 pool.lpToken.safeTransfer(feeAddress, depositFee);
             } else {
                 user.amount = user.amount.add(_amount);
+                pool.lpSupply = pool.lpSupply.add(_amount);
             }
             pool.lpSupply = pool.lpSupply.add(_amount);
         }
