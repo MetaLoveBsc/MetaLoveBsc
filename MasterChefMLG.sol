@@ -296,7 +296,6 @@ contract MasterChefMLG is Ownable, ReentrancyGuard {
                 user.amount = user.amount.add(_amount);
                 pool.lpSupply = pool.lpSupply.add(_amount);
             }
-            pool.lpSupply = pool.lpSupply.add(_amount);
         }
         user.rewardDebt = user.amount.mul(pool.accMLGPerShare).div(1e24);
         emit Deposit(msg.sender, _pid, _amount);
